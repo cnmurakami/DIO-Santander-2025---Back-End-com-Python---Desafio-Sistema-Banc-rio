@@ -1,3 +1,5 @@
+from classes import *
+
 clientes = [
         # Mock
         # {
@@ -24,9 +26,9 @@ def cadastrar_cliente():
         cpf = input('Digite o CPF: ').replace('.', '').replace('-', '').replace(' ','').strip()
         if len(cpf) != 11:
             raise
-        for i in clientes:
-            if i['cpf'] == cpf:
-                raise
+        cliente_existente = selecionar_cliente(cpf)
+        if cliente_existente != None:
+            raise
     except:
         print('CPF inválido ou já cadastrado.')
         return
@@ -40,7 +42,7 @@ def cadastrar_cliente():
         print('Data de nascimento inválida')
         return
     endereco = input('Digite o endereco: ').strip()
-    clientes.append({'nome': nome, 'data_nascimento': data_nascimento, 'cpf': cpf, 'endereco': endereco})
+    clientes.append(PessoaFisica(endereco, cpf, nome, data_nascimento))
     print('Usuário cadastrado com sucesso.')
     return
 
@@ -50,42 +52,27 @@ def selecionar_cliente(cpf):
         cpf = cpf.replace('.', '').replace('-', '').replace(' ','').strip()
         if len(cpf) != 11:
             raise
-        for i in range(len(clientes)):
-            if clientes[i]['cpf'] == cpf:
-                return i
+        for cliente in clientes:
+            if cliente.cpf == cpf:
+                return cliente
         raise
     except:
         print('CPF inválido ou nao cadastrado')
-        return -1
+        return None
 
-def cadastrar_conta(id):
+def cadastrar_conta(numero_conta, cliente):
     global contas
-    contas.append({'cliente_id': id, 'ag': '0001', 'saldo': 0.0, 'limite_saques_diarios': 3, 'saques_diarios': 0, 'limite_saque': 500, 'extrato': []})
-    print(f'Conta criada com sucesso. Número da conta: {len(contas)-1}.')
+    conta = ContaCorrente.nova_conta(cliente, numero_conta)
+    contas.append(conta)
+    cliente.adicionar_conta(conta)
 
-def selecionar_conta(id):
-    global contas
-    contas_ativas = {}
-    for i in range(len(contas)):
-        if contas[i]['cliente_id'] == id:
-            contas_ativas[i] = {'ag': contas[i]['ag'], 'saldo': contas[i]['saldo']}
-    if len(contas_ativas) == 0:
-        print('Não há contas ativas para este usuário')
-        return -1
-    while True:
-        print('\n\nContas ativas:')
-        for k in contas_ativas.keys():
-            print(f'    Conta: {k}, Agência: {contas_ativas[k]['ag']}, Saldo: {contas_ativas[k]['saldo']:.2f} ')
-        escolha = input('\nDigite o numero da conta ou V para voltar: ').lower()
-        try:
-            if escolha == 'v':
-                return -1
-            elif int(escolha) in contas_ativas.keys():
-                return int(escolha)
-            else:
-                raise
-        except:
-            print('Opção inválida')
+    print(f'Conta criada com sucesso.')
+
+def selecionar_conta(cliente):
+    if not cliente.contas:
+        print("Cliente não possui conta")
+        return
+    return cliente.contas[0]
             
 def atualizar_extrato(conta_id, valor: float):
     global contas
@@ -93,9 +80,8 @@ def atualizar_extrato(conta_id, valor: float):
     msg = f'Saque realizado: - R$ {-valor:.2f}' if valor < 0 else f'Depósito realizado: + R$ {valor:.2f}'
     conta['extrato'].append(msg)
 
-def deposito(id_conta):
-    global contas
-    conta = contas[id_conta]
+def deposito(conta):
+    global clientes
     try:
         valor = float(input("Insira o valor a depositar: R$ "))
         if valor <= 0:
@@ -103,16 +89,12 @@ def deposito(id_conta):
     except:
         print('Valor de depósito inválido')
         return
-    conta['saldo'] += valor
-    print(f'Deposito efetuado com sucesso. Saldo: {conta['saldo']:.2f}')
-    atualizar_extrato(id_conta, valor)
+    
+    transacao = Deposito(valor)
+    conta.cliente.realizar_transacao(conta, transacao)
 
-def saque(id_conta):
+def saque(conta):
     global contas
-    conta = contas[id_conta]
-    if conta['saques_diarios'] >= conta['limite_saques_diarios']:
-        print(f'Operação negada. Limite de saques diários atingido.')
-        return
     try:
         valor = float(input("Insira o valor a sacar: R$ "))
         if valor <= 0:
@@ -120,35 +102,26 @@ def saque(id_conta):
     except:
         print('Valor de saque inválido')
         return
-    if valor > conta['limite_saque']:
-        print(f'Operação negada. Valor máximo permitido: R$ {conta['limite_saque']:.2f}')
-        return
-    if valor > conta['saldo']:
-        print(f'Operação negada. Saldo insuficiente.')
-        return
-    conta['saldo'] -= valor
-    conta['saques_diarios'] += 1
-    print(f'Saque realizado com sucesso. Saldo: {conta['saldo']:.2f}')
-    atualizar_extrato(id_conta, -valor)
+    
+    transacao = Saque(valor)
+    conta.cliente.realizar_transacao(conta, transacao)
 
-def exibir_extrato(id_conta):
-    global contas
-    conta = contas[id_conta]
+def exibir_extrato(conta):
     print('\n================== EXTRATO ==================\n')
-    if not conta['extrato']:
+    if not conta.historico:
         print('Não foram realizadas movimentações.')
     else:
-        for i in conta['extrato']:
+        for i in conta.historico:
             print(i)
-    print(f'Saldo atual: R$ {conta['saldo']:.2f}')
+    print(f'Saldo atual: R$ {conta.saldo:.2f}')
     print('\n=============================================')
 
 def main():
     global contas, clientes
 
-    cliente_atual = -1
+    cliente_atual = None
     logado = False
-    conta_selecionada = -1
+    conta_selecionada = None
     nome = ''
     conta = ''
 
@@ -197,25 +170,25 @@ Menu:
             elif opcao == 'l':
                 cpf = input('Digite o CPF: ')
                 cliente_atual = selecionar_cliente(cpf)
-                if cliente_atual != -1:
+                if cliente_atual != None:
                     logado = True
-                    nome = clientes[cliente_atual]['nome']
+                    nome = cliente_atual.nome
             elif opcao == 'q':
                 break
             else:
                 print("Opção inválida")
-        elif logado and conta_selecionada == -1:
+        elif logado and conta_selecionada == None:
             opcao = input(menu_login)
             opcao = opcao.lower()
             if opcao == 'c':
                 cadastrar_conta(cliente_atual)
             elif opcao == 's':
                 conta_selecionada = selecionar_conta(cliente_atual)
-                if conta_selecionada != -1:
+                if conta_selecionada != None:
                     conta = conta_selecionada
             elif opcao == 'v':
                 logado = False
-                cliente_atual = -1
+                cliente_atual = None
                 nome = ''
             elif opcao == 'q':
                 break
@@ -233,7 +206,7 @@ Menu:
             elif opcao == 'e':
                 exibir_extrato(conta_selecionada)
             elif opcao == 'v':
-                conta_selecionada = -1
+                conta_selecionada = None
                 conta = ''
             elif opcao == 'q':
                 break
